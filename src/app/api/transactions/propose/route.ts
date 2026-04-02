@@ -26,5 +26,8 @@ export const POST = withMiddleware(withErrorHandler, withAuth)(async (req: Reque
     amount: result.amount,
     spend_today: result.spend_today,
     daily_limit: result.daily_limit,
+    tx_hash: result.tx_hash,
+    chain: body.chain || 'base',
+    token: body.token || 'USDC',
   });
 });

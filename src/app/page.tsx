@@ -11,6 +11,7 @@ type Session = {
   per_tx_limit: number;
   spend_today: number;
   allowed_chain: string;
+  allowed_chains: string[];
   allowed_token: string;
   status: 'active' | 'paused' | 'revoked';
   created_at: string;
@@ -114,7 +115,7 @@ export default function DashboardPage() {
             Agent Sessions
           </h1>
           <p className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
-            Spending Controls &amp; Authorization Queue / V2.1
+            Multi-Chain Spending Controls &amp; Authorization Queue / V3.0
           </p>
         </div>
         <button
@@ -201,7 +202,13 @@ export default function DashboardPage() {
                 <div className="text-[10px] font-mono text-muted-foreground">
                   Per-tx limit: <span className="text-foreground">${session.per_tx_limit}</span>
                   {' · '}
-                  {session.allowed_token} on {session.allowed_chain}
+                  {session.allowed_token} on{' '}
+                  {(session.allowed_chains ?? [session.allowed_chain]).map((c, i) => (
+                    <span key={c}>
+                      {i > 0 && ', '}
+                      <span className="text-primary">{c}</span>
+                    </span>
+                  ))}
                 </div>
 
                 {session.status !== 'revoked' && (

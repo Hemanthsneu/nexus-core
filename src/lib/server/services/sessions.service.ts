@@ -1,34 +1,38 @@
 import { getServerSupabase } from '@/lib/supabase/server';
 import { NotFoundError, ValidationError } from '../errors';
+import { getAdapterOrThrow } from '@/lib/chains/registry';
 
 const ALLOWED_STATUSES = ['active', 'paused', 'revoked'] as const;
 type SessionStatus = (typeof ALLOWED_STATUSES)[number];
-
-function generateWalletAddress(): string {
-  const bytes = new Uint8Array(20);
-  crypto.getRandomValues(bytes);
-  return '0x' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
 
 export type CreateSessionInput = {
   agent_name?: string;
   daily_limit?: number;
   per_tx_limit?: number;
   allowed_chain?: string;
+  allowed_chains?: string[];
   allowed_token?: string;
 };
 
 export async function createSession(input: CreateSessionInput, userId?: string) {
+  const primaryChain = input.allowed_chain || 'base';
+  const chains = input.allowed_chains || [primaryChain];
+
+  // Generate wallet via chain adapter
+  const adapter = getAdapterOrThrow(primaryChain);
+  const wallet = await adapter.generateWallet();
+
   const db = getServerSupabase();
   const { data, error } = await db
     .from('sessions')
     .insert([
       {
         agent_name: input.agent_name || `Agent-${Date.now()}`,
-        wallet_address: generateWalletAddress(),
+        wallet_address: wallet.address,
         daily_limit: Number(input.daily_limit) || 50.0,
         per_tx_limit: Number(input.per_tx_limit) || 10.0,
-        allowed_chain: input.allowed_chain || 'base',
+        allowed_chain: primaryChain,
+        allowed_chains: chains,
         allowed_token: input.allowed_token || 'USDC',
         status: 'active',
         ...(userId ? { user_id: userId } : {}),
@@ -70,6 +74,7 @@ export type UpdateSessionInput = {
   daily_limit?: number;
   per_tx_limit?: number;
   agent_name?: string;
+  allowed_chains?: string[];
 };
 
 export async function updateSession(id: string, input: UpdateSessionInput, userId?: string) {
@@ -98,6 +103,14 @@ export async function updateSession(id: string, input: UpdateSessionInput, userI
     const name = String(input.agent_name).trim();
     if (!name) throw new ValidationError('agent_name cannot be empty');
     patch.agent_name = name;
+  }
+
+  if (input.allowed_chains !== undefined) {
+    if (!Array.isArray(input.allowed_chains) || input.allowed_chains.length === 0) {
+      throw new ValidationError('allowed_chains must be a non-empty array');
+    }
+    patch.allowed_chains = input.allowed_chains;
+    patch.allowed_chain = input.allowed_chains[0];
   }
 
   if (Object.keys(patch).length === 0) {
