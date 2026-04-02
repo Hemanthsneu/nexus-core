@@ -2,6 +2,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { ValidationError, NotFoundError, ForbiddenError } from '../errors';
 import { notifyApprovalRequired } from '@/lib/notify';
 import { getAdapterOrThrow } from '@/lib/chains/registry';
+import { deliverEvent } from './webhook.service';
 
 export type ProposeInput = {
   session_id: string;
@@ -92,6 +93,13 @@ export async function proposeTransaction(input: ProposeInput, userId?: string): 
       reason: holdReason,
     });
 
+    if (userId) {
+      void deliverEvent(userId, 'transaction.held', {
+        approval_id: approval.id, session_id, amount: txAmount,
+        destination_address, chain: chainId, token, reason: holdReason,
+      });
+    }
+
     return { outcome: 'HOLD', approval_id: approval.id, reason: holdReason };
   }
 
@@ -124,6 +132,14 @@ export async function proposeTransaction(input: ProposeInput, userId?: string): 
     amount: txAmount, destination_address, outcome: 'approved',
     tx_hash: transferResult.txHash,
   });
+
+  if (userId) {
+    void deliverEvent(userId, 'transaction.approved', {
+      session_id, amount: txAmount, destination_address,
+      chain: chainId, token, tx_hash: transferResult.txHash,
+      spend_today: newSpend, daily_limit: session.daily_limit,
+    });
+  }
 
   return {
     outcome: 'APPROVE',

@@ -1,6 +1,7 @@
 import { getServerSupabase } from '@/lib/supabase/server';
 import { NotFoundError, ValidationError } from '../errors';
 import { getAdapterOrThrow } from '@/lib/chains/registry';
+import { deliverEvent } from './webhook.service';
 
 const ALLOWED_STATUSES = ['active', 'paused', 'revoked'] as const;
 type SessionStatus = (typeof ALLOWED_STATUSES)[number];
@@ -42,6 +43,14 @@ export async function createSession(input: CreateSessionInput, userId?: string) 
     .single();
 
   if (error) throw new ValidationError(error.message);
+
+  if (userId) {
+    void deliverEvent(userId, 'session.created', {
+      session_id: data.id, agent_name: data.agent_name,
+      wallet_address: data.wallet_address, chains: data.allowed_chains,
+    });
+  }
+
   return data;
 }
 
@@ -123,6 +132,12 @@ export async function updateSession(id: string, input: UpdateSessionInput, userI
 
   const { data, error } = await query.select().single();
   if (error || !data) throw new NotFoundError('Session', id);
+
+  if (userId) {
+    const eventType = patch.status === 'revoked' ? 'session.revoked' : 'session.updated';
+    void deliverEvent(userId, eventType, { session_id: id, changes: patch });
+  }
+
   return data;
 }
 

@@ -1,5 +1,6 @@
 import { getServerSupabase } from '@/lib/supabase/server';
 import { NotFoundError, ValidationError, ConflictError } from '../errors';
+import { deliverEvent } from './webhook.service';
 
 export type ListApprovalsOptions = {
   status?: string;
@@ -81,6 +82,13 @@ export async function resolveApproval(id: string, action: 'approve' | 'reject', 
       .eq('id', approval.session_id);
 
     if (spendError) throw new Error(spendError.message);
+  }
+
+  if (userId) {
+    void deliverEvent(userId, 'approval.resolved', {
+      approval_id: id, action, session_id: approval.session_id,
+      amount: approval.amount,
+    });
   }
 
   return { id, status: newStatus, resolved_at: resolvedAt };
