@@ -4,13 +4,14 @@ import { NotFoundError, ValidationError, ConflictError } from '../errors';
 export type ListApprovalsOptions = {
   status?: string;
   sessionId?: string;
+  userId?: string;
 };
 
 export async function listApprovals(options: ListApprovalsOptions = {}) {
   const db = getServerSupabase();
   let query = db
     .from('pending_approvals')
-    .select('*, sessions(agent_name, wallet_address, daily_limit, per_tx_limit)')
+    .select('*, sessions(agent_name, wallet_address, daily_limit, per_tx_limit, user_id)')
     .order('created_at', { ascending: false });
 
   const status = options.status ?? 'pending';
@@ -24,10 +25,19 @@ export async function listApprovals(options: ListApprovalsOptions = {}) {
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
+
+  // If userId provided, filter to only approvals for the user's sessions
+  if (options.userId && data) {
+    return data.filter((a) => {
+      const session = a.sessions as Record<string, unknown> | null;
+      return session?.user_id === options.userId;
+    });
+  }
+
   return data;
 }
 
-export async function resolveApproval(id: string, action: 'approve' | 'reject') {
+export async function resolveApproval(id: string, action: 'approve' | 'reject', userId?: string) {
   if (action !== 'approve' && action !== 'reject') {
     throw new ValidationError('action must be "approve" or "reject"');
   }
@@ -41,6 +51,12 @@ export async function resolveApproval(id: string, action: 'approve' | 'reject') 
     .single();
 
   if (fetchError || !approval) throw new NotFoundError('Approval', id);
+
+  // Verify ownership if userId is provided
+  if (userId) {
+    const session = approval.sessions as Record<string, unknown> | null;
+    if (session?.user_id !== userId) throw new NotFoundError('Approval', id);
+  }
 
   if (approval.status !== 'pending') {
     throw new ConflictError(`Approval already resolved with status: ${approval.status}`);

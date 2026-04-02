@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server';
 import { withMiddleware, withErrorHandler } from '@/lib/server/middleware';
+import { withAuth, getUserId } from '@/lib/server/auth';
 import { getSession, updateSession } from '@/lib/server/services/sessions.service';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export const GET = withMiddleware(withErrorHandler)(async (_request: Request, ctx: RouteContext) => {
+export const GET = withMiddleware(withErrorHandler, withAuth)(async (req: Request, ctx: RouteContext) => {
   const { id } = await ctx.params;
-  const session = await getSession(id);
+  const userId = getUserId(req);
+  const session = await getSession(id, userId);
   return NextResponse.json(session);
 });
 
-export const PATCH = withMiddleware(withErrorHandler)(async (request: Request, ctx: RouteContext) => {
+export const PATCH = withMiddleware(withErrorHandler, withAuth)(async (req: Request, ctx: RouteContext) => {
   const { id } = await ctx.params;
-  const body = await request.json();
-  const session = await updateSession(id, body);
+  const userId = getUserId(req);
+  const body = await req.json();
+  const session = await updateSession(id, body, userId);
   return NextResponse.json(session);
 });

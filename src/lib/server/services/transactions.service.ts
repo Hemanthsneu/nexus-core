@@ -12,7 +12,7 @@ export type ProposeResult =
   | { outcome: 'APPROVE'; amount: number; spend_today: number; daily_limit: number }
   | { outcome: 'HOLD'; approval_id: string; reason: string };
 
-export async function proposeTransaction(input: ProposeInput): Promise<ProposeResult> {
+export async function proposeTransaction(input: ProposeInput, userId?: string): Promise<ProposeResult> {
   const { session_id, amount, destination_address } = input;
 
   if (!session_id || amount === undefined || !destination_address) {
@@ -26,13 +26,11 @@ export async function proposeTransaction(input: ProposeInput): Promise<ProposeRe
 
   const db = getServerSupabase();
 
-  // 1. Fetch the session
-  const { data: session, error: sessionError } = await db
-    .from('sessions')
-    .select('*')
-    .eq('id', session_id)
-    .single();
+  // 1. Fetch the session (scoped to user if authenticated)
+  let query = db.from('sessions').select('*').eq('id', session_id);
+  if (userId) query = query.eq('user_id', userId);
 
+  const { data: session, error: sessionError } = await query.single();
   if (sessionError || !session) throw new NotFoundError('Session', session_id);
 
   if (session.status !== 'active') {
@@ -55,7 +53,7 @@ export async function proposeTransaction(input: ProposeInput): Promise<ProposeRe
     holdReason = `Exceeds daily limit (Attempted: $${txAmount}, Remaining: $${remaining})`;
   }
 
-  // 3. HOLD path — create approval record + notify
+  // 3. HOLD path
   if (holdReason) {
     const { data: approval, error: approvalError } = await db
       .from('pending_approvals')
@@ -78,9 +76,7 @@ export async function proposeTransaction(input: ProposeInput): Promise<ProposeRe
     return { outcome: 'HOLD', approval_id: approval.id, reason: holdReason };
   }
 
-  // 4. APPROVE path — atomic spend increment via SQL rpc when available,
-  //    falling back to read-modify-write.
-  //    Migration 002 adds the `increment_spend` function for race safety.
+  // 4. APPROVE path — atomic spend increment
   const newSpend = Number(session.spend_today) + txAmount;
   const { error: rpcError } = await db.rpc('increment_spend', {
     p_session_id: session.id,
@@ -88,7 +84,6 @@ export async function proposeTransaction(input: ProposeInput): Promise<ProposeRe
   });
 
   if (rpcError) {
-    // Fallback: rpc not yet deployed — use direct update (MVP behavior)
     const { error: updateError } = await db
       .from('sessions')
       .update({ spend_today: newSpend })

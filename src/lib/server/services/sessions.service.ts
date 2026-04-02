@@ -18,7 +18,7 @@ export type CreateSessionInput = {
   allowed_token?: string;
 };
 
-export async function createSession(input: CreateSessionInput) {
+export async function createSession(input: CreateSessionInput, userId?: string) {
   const db = getServerSupabase();
   const { data, error } = await db
     .from('sessions')
@@ -31,6 +31,7 @@ export async function createSession(input: CreateSessionInput) {
         allowed_chain: input.allowed_chain || 'base',
         allowed_token: input.allowed_token || 'USDC',
         status: 'active',
+        ...(userId ? { user_id: userId } : {}),
       },
     ])
     .select()
@@ -40,25 +41,26 @@ export async function createSession(input: CreateSessionInput) {
   return data;
 }
 
-export async function listSessions() {
+export async function listSessions(userId?: string) {
   const db = getServerSupabase();
-  const { data, error } = await db
+  let query = db
     .from('sessions')
     .select('*')
     .order('created_at', { ascending: false });
 
+  if (userId) query = query.eq('user_id', userId);
+
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
   return data;
 }
 
-export async function getSession(id: string) {
+export async function getSession(id: string, userId?: string) {
   const db = getServerSupabase();
-  const { data, error } = await db
-    .from('sessions')
-    .select('*')
-    .eq('id', id)
-    .single();
+  let query = db.from('sessions').select('*').eq('id', id);
+  if (userId) query = query.eq('user_id', userId);
 
+  const { data, error } = await query.single();
   if (error || !data) throw new NotFoundError('Session', id);
   return data;
 }
@@ -70,7 +72,7 @@ export type UpdateSessionInput = {
   agent_name?: string;
 };
 
-export async function updateSession(id: string, input: UpdateSessionInput) {
+export async function updateSession(id: string, input: UpdateSessionInput, userId?: string) {
   const patch: Record<string, unknown> = {};
 
   if (input.status !== undefined) {
@@ -103,13 +105,10 @@ export async function updateSession(id: string, input: UpdateSessionInput) {
   }
 
   const db = getServerSupabase();
-  const { data, error } = await db
-    .from('sessions')
-    .update(patch)
-    .eq('id', id)
-    .select()
-    .single();
+  let query = db.from('sessions').update(patch).eq('id', id);
+  if (userId) query = query.eq('user_id', userId);
 
+  const { data, error } = await query.select().single();
   if (error || !data) throw new NotFoundError('Session', id);
   return data;
 }
