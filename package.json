@@ -1,29 +1,24 @@
 {
-  "name": "nexus-app",
+  "name": "nexus-core",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "lint:backend": "eslint src/lib/server/**/*.ts src/app/api/**/*.ts src/lib/sdk/**/*.ts",
-    "openapi:validate": "node scripts/validate-openapi.mjs",
-    "sdk:generate": "node scripts/generate-sdk.mjs",
-    "sdk:version": "node scripts/sdk-version.mjs",
-    "ci:check": "npm run openapi:validate && npm run sdk:generate && npm run lint:backend && npm run build"
+    "setup": "node scripts/setup-supabase.mjs",
+    "dev": "npx next dev -p 3001 --webpack",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start",
+    "lint": "eslint"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@types/pg": "^8.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",
     "next": "16.1.6",
+    "@supabase/supabase-js": "^2.39.3",
     "next-themes": "^0.4.6",
-    "pg": "^8.20.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.8.0",
@@ -37,10 +32,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "openapi-typescript": "^7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

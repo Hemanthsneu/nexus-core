@@ -1,86 +1,119 @@
-# Nexus App
+# Nexus Core
 
-Production-ready foundation for a multi-chain payments platform inspired by Nexus Protocol.
+Control plane for autonomous AI agent payments. Sessions with spending limits, human-in-the-loop approval workflows, and real-time operator dashboard.
 
-## Prerequisites
-- Node.js 20+
-- npm 10+
-- PostgreSQL 14+ (recommended for production mode)
+## Architecture
 
-## Environment setup
-1. Copy env template:
-   - `cp .env.example .env.local`
-2. Update `DATABASE_URL` in `.env.local`.
-3. Set `NEXUS_ADMIN_API_KEY` in `.env.local` for admin-only operations (for example merchant creation).
-4. Set `NEXUS_JOB_RUNNER_KEY` in `.env.local` for secure background job execution.
+```
+src/
+  app/
+    page.tsx                        Dashboard (client component)
+    api/
+      sessions/         route.ts    GET list, POST create
+      sessions/[id]/    route.ts    GET single, PATCH update status/limits
+      approvals/        route.ts    GET list (filter by status/session)
+      approvals/[id]/   route.ts    PATCH approve/reject
+      transactions/propose/ route.ts POST — policy engine: auto-approve or hold
+      cron/reset-spend/ route.ts    POST — daily spend counter reset
+  lib/
+    server/
+      middleware.ts                 Composable route middleware (error handler, future: auth, rate limit)
+      errors.ts                     Typed error classes (AppError, NotFoundError, ValidationError, etc.)
+      env.ts                        Validated, typed environment config
+      services/
+        sessions.service.ts         Session CRUD + wallet generation
+        approvals.service.ts        Approval resolution with spend update
+        transactions.service.ts     Policy engine: limit checks, hold/approve, atomic spend
+    supabase/
+      client.ts                     Browser-safe anon client (lazy proxy)
+      server.ts                     Server-only client (service role when available)
+    notify.ts                       Microsoft Teams Adaptive Card notifications
+    utils.ts                        Tailwind cn() helper
+  components/                       UI: Navbar, HUDOverlay, ThemeToggle, shadcn primitives
 
-If `DATABASE_URL` is missing, API routes automatically fall back to in-memory storage for local/demo use.
-
-## Database setup
-Apply schema:
-
-```bash
-psql "$DATABASE_URL" -f db/schema.sql
+supabase/
+  migrations/
+    001_initial_schema.sql          Sessions + pending_approvals tables
+    002_atomic_spend.sql            Race-safe spend increment function
 ```
 
-The server also performs defensive `CREATE TABLE IF NOT EXISTS` on first API use.
+## Middleware Pattern
 
-## Run locally
+Routes are thin HTTP adapters. Business logic lives in services. Middleware composes around handlers:
+
+```typescript
+export const POST = withMiddleware(withErrorHandler)(async (request) => {
+  const body = await request.json();
+  const result = await proposeTransaction(body);
+  return NextResponse.json(result);
+});
+```
+
+Future phases slot in new middleware without touching handler logic:
+
+```typescript
+// Phase 1: add auth
+export const POST = withMiddleware(withErrorHandler, withAuth)(handler);
+
+// Phase 2: add rate limiting
+export const POST = withMiddleware(withErrorHandler, withAuth, withRateLimit)(handler);
+```
+
+## Quick Start
 
 ```bash
+# Install
 npm install
-npm run dev
+
+# Set up Supabase (interactive — creates project, applies migrations, writes .env.local)
+npm run setup
+
+# Or manually: copy .env.example → .env.local and fill in values
+
+# Start dev server
+npm run dev        # http://localhost:3001
+
+# Test the agent flow
+node test-agent.mjs
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+## Environment Variables
 
-## API notes
-- All API routes require API key auth (`x-api-key` or `Authorization: Bearer <key>`).
-- `/api/payments` supports idempotency via `idempotencyKey`.
-- `/api/agents` and `/api/merchants` persist records in Postgres when configured.
-- All APIs return standardized envelopes with `requestId`.
-- Basic per-route rate limiting is enabled.
-- Webhook delivery for payment lifecycle events is signed and retried.
-- Async payment/webhook jobs are persisted in `async_jobs`.
-- OpenAPI spec endpoint: `GET /api/openapi`.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Recommended | Service role key for server-side writes (bypasses RLS) |
+| `TEAMS_WEBHOOK_URL` | Optional | Teams incoming webhook for approval alerts |
+| `CRON_SECRET` | Optional | Secures the daily spend reset endpoint |
+| `NEXT_PUBLIC_APP_URL` | Optional | Dashboard URL for Teams card links (default: `http://localhost:3001`) |
 
-### Scope model
-- `payments:write`, `payments:read`
-- `agents:write`, `agents:read`
-- `merchants:write` (admin key recommended)
+## API
 
-### Webhook signing
-- Header: `x-nexus-signature: sha256=<hex>`
-- Header: `x-nexus-event: <event_type>`
-- Retries: 3 attempts with exponential backoff via async job runner.
-- Exhausted deliveries are written to `webhook_dead_letters`.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sessions` | List all agent sessions |
+| POST | `/api/sessions` | Create a new session with wallet and limits |
+| GET | `/api/sessions/:id` | Get a single session |
+| PATCH | `/api/sessions/:id` | Update status, limits, or name |
+| POST | `/api/transactions/propose` | Propose a payment — auto-approve or hold |
+| GET | `/api/approvals` | List pending approvals |
+| PATCH | `/api/approvals/:id` | Approve or reject a held transaction |
+| POST | `/api/cron/reset-spend` | Reset daily spend counters |
 
-### Job runner endpoint
-- Route: `POST /api/internal/jobs`
-- Auth header: `x-job-runner-key: <NEXUS_JOB_RUNNER_KEY>`
-- Body (optional): `{ "limit": 25 }`
-- Trigger this endpoint from a scheduler/cron every few seconds in production.
+## Database Migrations
 
-### Observability endpoints
-- `GET /api/internal/health` (auth required via internal key)
-- `GET /api/internal/metrics` (auth required via internal key)
-- Internal metrics include API/job counters and queue status.
+Migrations live in `supabase/migrations/` and run in alphabetical order. The setup script applies them automatically. To add a new migration:
 
-## OpenAPI + SDK
-- Source spec: `openapi/nexus.v1.json`
-- Runtime endpoint: `/api/openapi`
-- Validate spec: `npm run openapi:validate`
-- Generate SDK types: `npm run sdk:generate`
-- Read spec version: `npm run sdk:version`
-- SDK scaffold: `src/lib/sdk/nexus-client.ts` + `src/lib/sdk/generated.ts`
+1. Create `supabase/migrations/003_your_change.sql`
+2. Run `npm run setup` (or apply manually in Supabase SQL editor)
 
-## CI quality gate
-- Run all backend-safe checks locally: `npm run ci:check`
-- Workflow file: `.github/workflows/ci.yml`
+Previous migrations are never modified — this ensures forward compatibility.
 
-## Security baseline
-- Security headers are set in `middleware.ts`.
-- `x-powered-by` header is disabled.
-- IDs and secrets use crypto-safe randomness.
+## Tech Stack
 
-See `PRODUCTION_READINESS.md` for rollout checklist and next hardening tasks.
+- **Framework**: Next.js 16 (App Router, webpack)
+- **Language**: TypeScript (strict mode)
+- **Database**: Supabase (PostgreSQL + Realtime)
+- **UI**: Tailwind CSS v4, shadcn primitives, Framer Motion
+- **Notifications**: Microsoft Teams Adaptive Cards
